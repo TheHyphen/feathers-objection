@@ -12,6 +12,7 @@ export default class Company extends Model {
       id: { type: 'integer' },
       name: { type: 'string' },
       ceo: { type: ['integer', 'null'] },
+      size: { type: ['string', 'null'], enum: ['small', 'medium', 'large', null] },
       jsonObject: {
         type: ['object', 'null'],
         properties: {
@@ -29,6 +30,36 @@ export default class Company extends Model {
       jsonArray: { type: ['array', 'null'] },
       jsonbObject: { type: ['object', 'null'] },
       jsonbArray: { type: ['array', 'null'] }
+    }
+  }
+
+  static modifiers = {
+    orderByName: builder => {
+      builder.orderBy('name');
+    },
+    google: builder => {
+      builder.where('companies.name', 'Google')
+        .select(['companies.name'])
+        .groupBy(['companies.name']);
+    },
+    googleWithEager: builder => {
+      builder.where('companies.name', 'Google')
+        .select(['companies.name'])
+        .groupBy(['companies.name', 'companies.id']);
+    },
+    apple: (builder, hasCeo) => {
+      builder.where('name', 'Apple');
+    },
+    large: (builder, hasCeo) => {
+      builder.where('size', 'large');
+
+      if (hasCeo) { builder.whereNot('ceo', null); }
+    },
+    withRelation: builder => {
+      builder.withGraphFetched('employees');
+    },
+    withRelationAndGroupBy: builder => {
+      builder.withGraphFetched('employees').groupBy('id');
     }
   }
 
@@ -58,5 +89,9 @@ export default class Company extends Model {
         to: 'clients.companyId'
       }
     }
+  }
+
+  $beforeInsert () {
+    if (this.id) { this.id = 99; }
   }
 }

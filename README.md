@@ -8,7 +8,7 @@
 
 [Feathers](https://feathersjs.com/) database adapter for
 [Objection.js](https://vincit.github.io/objection.js), an ORM based on
-[KnexJS](https://knexjs.org/) SQL query builder for Postgres, MSSQL, MySQL,
+[KnexJS](https://knexjs.org/) SQL query builder for Postgres, Redshift, MSSQL, MySQL,
 MariaDB, SQLite3, and Oracle.
 
 ## Installation
@@ -91,20 +91,27 @@ module.exports = function(app) {
 
 ### Service Options
 
-- `model` (**required**) - The Objection model definition
+- `model` (**required**) - The Objection model definition.
+
 - `id` (_optional_, default: `model.idColumn` or `'id'`) - The name of the id field property. Use
-  array of strings for composite primary keys
-- `events` (_optional_) - A list of
+  array of strings for composite primary keys.
+  
+- `events` (_optional_) - List of
   [custom service events](https://docs.feathersjs.com/api/events.html#custom-events)
-  sent by this service
-- `paginate` (_optional_) - A
-  [pagination object](https://docs.feathersjs.com/api/databases/common.html#pagination)
-  containing a `default` and `max` page size
+  sent by this service.
+
+- `paginate` (_optional_) - [Pagination object](https://docs.feathersjs.com/api/databases/common.html#pagination)
+  containing a `default` and `max` page size.
+
 - `multi` (_optional_) - Allow `create` with arrays and `update` and `remove`
   with `id` `null` to change multiple items. Can be `true` for all methods or an
-  array of allowed methods (e.g. `[ 'remove', 'create' ]`)
-- `whitelist` (_optional_) - A list of additional query operators to allow (e.g.
-  `[ '$eager', '$joinRelation' ]`)
+  array of allowed methods (e.g. `[ 'remove', 'create' ]`).
+
+- `whitelist` (_optional_) - List of additional query operators to allow (e.g.
+  `[ '$eager', '$joinRelation' ]`).
+
+- `schema` (_optional_) - Database schema to use with all the service queries (e.g.
+  `public`). See [`withSchema`](https://vincit.github.io/objection.js/api/query-builder/find-methods.html#withschema) documentation.
 
 ### Default Query Operators
 
@@ -127,13 +134,15 @@ operators are:
 '$ilike',
 '$notILike',
 '$or',
-'$and'
+'$and',
+'$sort',
+'$not'
 ```
 
 ### Eager Queries
 
 Eager queries is one way of solving the SQL database relational model in
-Feathers services, instead of relying with hooks.
+Feathers services, instead of relying on hooks.
 
 #### Service Options
 
@@ -144,7 +153,7 @@ Note that all this eager related options are optional.
   [`allowGraph`](https://vincit.github.io/objection.js/api/query-builder/eager-methods.html#allowgraph)
   documentation.
   
-- **`eagerOptions`** - Options object to use with `$eager` and `$joinEager` query operators. 
+- **`eagerOptions`** - options object to use with `$eager` and `$joinEager` query operators. 
   See [`GraphOptions`](https://vincit.github.io/objection.js/api/types/#type-graphoptions)
   documentation.
 
@@ -157,6 +166,16 @@ Note that all this eager related options are optional.
 
 #### Query Operators
 
+- **`$modify`** - modifiers allow you to easily reuse snippets of query logic. you can pass arguments and use 
+  multiple modifiers. value can be one of the following:
+    - String with comma-separated modifier names. e.g. `modifier1,modifier2`
+    - Array or serialized array with modifier name or array of modifier names as the first item. The rest of the array items would be the modifier/s arguments.
+    e.g. `['modifier1', arg1, arg2]` or `[['modifier1', 'modifier2'], arg1, arg2]`
+    - Object or serialized object with modifiers as keys and their arguments as values. Set modifier's value to `true` when it has no arguments. 
+    e.g. `{ modifier1: [arg1, arg2], modifier2: [arg3, arg4], modifier3: true }`
+  
+  See [`modify`](https://vincit.github.io/objection.js/api/query-builder/other-methods.html#modify) documentation.
+
 - **`$eager`** - eager load relations defined in models' `relationMappings` getter methods. See
   [`withGraphFetched`](https://vincit.github.io/objection.js/api/query-builder/eager-methods.html#withgraphfetched) documentation.
   
@@ -168,18 +187,28 @@ Note that all this eager related options are optional.
   [`withGraphJoined`](https://vincit.github.io/objection.js/api/query-builder/eager-methods.html#withgraphjoined)
   documentation.
   
-- **`$modifyEager`** - filter relation based on a relation's field,
+- **`$modifyEager`** - filter relation based on a relation's field. does not support JSON fields.
   e.g. `companies.find({ query: { $eager: 'employees', $modifyEager: { employees: { name: 'John' } } } })`
   
 - **`$mergeEager`** - merge an eager expression to `$eager`,
   e.g. `companies.find({ query: { $eager: 'employees', $mergeEager: 'ceos' } })`
-  
-- **`$select`** - add SELECT statement with given array of column names. See
-    [`$select`](https://vincit.github.io/objection.js/api/query-builder/find-methods.html#select) documentation.
+
+- **`$allowRefs`** - allow the usage of `ref` keyword to reference another field. Reference a relation's field using `$joinEager` or `$joinRelation`,
+  e.g. `companies.find({ query: { name: 'ref(size)', $allowRefs: true } })`, `employees.find({ query: { $joinEager: 'company', 'company.name': 'ref(employees.name)', $allowRefs: true } })`. See
+  [`ref`](https://vincit.github.io/objection.js/api/objection/#ref) documentation.    
+
+- **`$select`** - add SELECT statement with given array of column names, e.g. `['name', 'ref(jsonb:a)', 'ref(jsonb:a) as a']`. See
+  [`select`](https://vincit.github.io/objection.js/api/query-builder/find-methods.html#select) 
+  and [`FieldExpression`](https://vincit.github.io/objection.js/api/types/#type-fieldexpression) documentation.
+    
+- **`$sort`** - add an order by clause to the query, e.g. `query: { $sort: { a: 1, 'b.c': -1, 'ref(jsonb:a)': 1 } }`. See
+  [`FieldExpression`](https://vincit.github.io/objection.js/api/types/#type-fieldexpression) documentation.    
 
 - **`$noSelect`** - skips SELECT queries in create, patch & remove requests. response data will be based on the input data.
 
-- **`$null`** - filter based on if a column is NULL with REST support, e.g. `companies.find({ query: { ceo: { $null: false } } })`, `companies.find({ query: { ceo: { $null: 'false' } } })` 
+- **`$null`** - filter based on if a column is NULL with REST support, e.g. `companies.find({ query: { ceo: { $null: false } } })`, `companies.find({ query: { ceo: { $null: 'false' } } })`
+
+- **`$not`** - filter based on if a query is NOT true. It can be used with an object `$not: { name: { $in: ['craig', 'tim'] } }` or array `$not: [ { $id: 1 }, { $id: 2 } ]`
 
 - **`$between`** - filter based on if a column value is between range of values
 
@@ -217,6 +246,8 @@ Note that all this eager related options are optional.
   [`transaction`](https://vincit.github.io/objection.js/api/objection/#transaction)
   documentation.
 
+- **`atomic`** - when `true` ensure that multi create or graph insert/upsert success or fail all at once. Under the hood, automaticaly create a transaction and commit on success or rollback on partial or total failure. __Ignored__ if you added your own `transaction` object in params.
+
 - **`mergeAllowEager`** - Will merge the given expression to the existing expression from the `allowEager` service option. 
   See [`allowGraph`](https://vincit.github.io/objection.js/api/query-builder/eager-methods.html#allowgraph)
   documentation.
@@ -225,6 +256,13 @@ Note that all this eager related options are optional.
   merges on top of the `eagerOptions` service option.
   See [`GraphOptions`](https://vincit.github.io/objection.js/api/types/#type-graphoptions)
   documentation.
+  
+- **`schema`** - Database schema to use with the query (e.g. `public`)
+  See [`withSchema`](https://vincit.github.io/objection.js/api/query-builder/find-methods.html#withschema)
+  documentation.
+
+- **`modifierFiltersResults`** - when `false` the `total` count of a `find()` query is calculated from the original result set, ignoring the `count` of any `$modify` query.
+  The default behaviour is to apply the count of the modifier to the result total, assuming that the modifier may influence the result total by filtering the result set. This can be used to workaround issues with `groupBy` and the result count. See [this issue](https://github.com/feathersjs-ecosystem/feathers-objection/issues/102) for a detailed explanation.
 
 ### Composite primary keys
 
@@ -311,12 +349,9 @@ app.service('companies').find({
 
 Arbitrary relation graphs can be upserted (insert + update + delete) using the
 upsertGraph method. See
-[`examples`](https://vincit.github.io/objection.js/guide/query-examples.html#graph-upserts) for a better
-explanation.  
-Runs on `update` and `patch` service methods when `id` is set.
+[`examples`](https://vincit.github.io/objection.js/guide/query-examples.html#graph-upserts) for a better explanation.  
 
-_The relation being upserted must also be present in `allowedEager` option and
-included in `$eager` query when using the `update` service method._
+Runs on `update` and `patch` service methods when `id` is set. When the `data` object also contains `id`, then both must be the same or an error is thrown.
 
 #### Service Options
 
@@ -357,15 +392,14 @@ be updated (if there are any changes at all).
 #### Params Operators
 
 - **`mergeAllowUpsert`** - Merge given expression into `allowedUpsert`.
+- **`mergeUpsertGraphOptions`** - Merge given options into `upsertGraphOptions`.
 
 ### Graph insert
 
 Arbitrary relation graphs can be inserted using the insertGraph method. Provides
-the ability to relate the inserted object with its associations. Runs on the
-`.create(data, params)` service method.
+the ability to relate the inserted object with its associations.  
 
-_The relation being created must also be present in `allowedEager` option and
-included in `$eager` query._
+Runs on the `.create(data, params)` service method.
 
 #### Service Options
 
@@ -381,6 +415,7 @@ included in `$eager` query._
 #### Params Operators
 
 - **`mergeAllowInsert`** - Merge given expression into `allowedInsert`.
+- **`mergeInsertGraphOptions`** - Merge given options into `insertGraphOptions`.
 
 ### Transaction
 
@@ -395,15 +430,15 @@ users.service.js
 
 ```js
 const createService = require('feathers-objection');
-const createModal = require('../../models/users.model');
+const createModel = require('../../models/users.model');
 const hooks = require('./users.hooks');
 
 module.exports = function(app) {
-  const Modal = createModal(app);
+  const Model = createModel(app);
   const paginate = app.get('paginate');
 
   const options = {
-    model: Modal,
+    model: Model,
     paginate,
     whitelist: ['$eager', '$joinRelation'],
     allowedEager: 'todos'
@@ -421,15 +456,15 @@ todos.service.js
 
 ```js
 const createService = require('feathers-objection');
-const createModal = require('../../models/todos.model');
+const createModel = require('../../models/todos.model');
 const hooks = require('./todos.hooks');
 
 module.exports = function(app) {
-  const Modal = createModal(app);
+  const Model = createModel(app);
   const paginate = app.get('paginate');
 
   const options = {
-    model: Modal,
+    model: Model,
     paginate,
     whitelist: ['$eager', '$joinRelation'],
     allowedEager: '[user, subtask]',
@@ -786,7 +821,7 @@ module.exports = app.listen(3030);
 console.log('Feathers Todo Objection service running on 127.0.0.1:3030');
 ```
 
-Run the example with `node app` and go to
+Run the [example](https://github.com/feathersjs-ecosystem/feathers-objection/tree/master/example) app with `npm run example` and go to
 [localhost:3030/todos](http://localhost:3030/todos).
 
 You should see an empty array. That's because you don't have any Todos yet, but
@@ -798,7 +833,6 @@ you now have full CRUD for your new todos service!
 and to [seed](http://knexjs.org/#Seeds) a table with mock data.
   
 ## Error handling
-
 As of version 4.8.0, `feathers-objection` only throws [Feathers Errors](https://docs.feathersjs.com/api/errors.html) 
 with the message.  
 On the server, the original error can be retrieved through a secure symbol via  `error[require('feathers-objection').ERROR]`.
@@ -814,6 +848,10 @@ try {
   const originalError = error[ERROR];
 }
 ```
+
+As of version 7.0.0, `feathers-objection` has normalized errors accross all databases supported by Objection, and makes a best-effort attempt to provide reasonable error messages that can be returned directly to the client.
+
+If these error messages do not work for your needs, the original error is still available using the symbol described above.
 
 ## Migrating to `feathers-objection` v2
 
@@ -842,8 +880,34 @@ The following breaking changes have been introduced:
 - `namedEagerFilters` service option was removed. use Model's [`modifiers`](https://vincit.github.io/objection.js/recipes/modifiers.html#modifiers) instead
 - Model's `namedFilters` property was renamed to `modifiers`
 
+## Migrating to `feathers-objection` v6
+
+`feathers-objection` 6.0.0 comes with usability and security updates
+
+- `$not` operator is now available. It can be used with an object `$not: { name: { $in: ["craig", "tim"] } }` or array `$not: [ { $id: 1 }, { $id: 2 } ]`
+- `$eager` is no longer needed with upsert operations
+
+The following breaking changes have been introduced:
+
+- Graph upsert now requires that `id` fields in the `data` object will match the `id` argument
+- `$noSelect` now always return the input data
+- `$select` is now honored with upsert methods
+- `patch` method now enforce `params.query` with upsert
+- NotFound error will be thrown when `get` & `update` methods are called with different values in `id` & `params.query.id`
+
+## Migrating to `feathers-objection` v7
+
+`feathers-objection` 7.0.0 comes with improved error handling.
+
+The following breaking changes have been introduced:
+
+- All Databases will return the same types of errors based on the underlying Objection error
+- SQL Driver error text is no longer used as the Feathers error message
+- Objection errors are mapped more accurately to Feathers errors, e.g.
+  - Objection's `UniqueViolationError` -> Feathers' `Conflict` error type
+
 ## License
 
-Copyright © 2019
+Copyright © 2020
 
 Licensed under the [MIT license](LICENSE).

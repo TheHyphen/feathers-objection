@@ -15,7 +15,18 @@ import PeopleRoomsCustomIdSeparator from './people-rooms-custom-id-separator';
 import Company from './company';
 import Employee from './employee';
 import Client from './client';
-import { Model } from 'objection';
+import {
+  CheckViolationError,
+  ConstraintViolationError,
+  DataError,
+  DBError,
+  ForeignKeyViolationError,
+  Model,
+  NotFoundError,
+  NotNullViolationError,
+  UniqueViolationError,
+  ValidationError
+} from 'objection';
 
 const testSuite = adapterTests([
   '.options',
@@ -30,21 +41,28 @@ const testSuite = adapterTests([
   '.get + $select',
   '.get + id + query',
   '.get + NotFound',
+  '.get + id + query id',
   '.find',
   '.remove',
   '.remove + $select',
   '.remove + id + query',
+  // '.remove + id + query id', // TODO: check why it's failing
   '.remove + multi',
   '.update',
   '.update + $select',
   '.update + id + query',
+  '.update + id + query id',
   '.update + NotFound',
+  '.update + query + NotFound',
   '.patch',
   '.patch + $select',
   '.patch + id + query',
+  '.patch + id + query id',
   '.patch multiple',
-  '.patch multi query',
+  '.patch multi query same',
+  '.patch multi query changed',
   '.patch + NotFound',
+  '.patch + query + NotFound',
   '.create',
   '.create + $select',
   '.create multi',
@@ -97,7 +115,7 @@ const app = feathers()
       model: People,
       id: 'id',
       multi: ['create'],
-      whitelist: ['$and', '$like', '$between', '$notBetween'],
+      whitelist: ['$and', '$like', '$between', '$notBetween', '$null', '$noSelect'],
       events: ['testing']
     })
   )
@@ -134,8 +152,8 @@ const app = feathers()
       model: Company,
       id: 'id',
       multi: ['create', 'remove', 'patch'],
-      whitelist: ['$eager', '$modifyEager', '$mergeEager', '$between', '$notBetween', '$containsKey', '$contains', '$contained', '$any', '$all', '$noSelect', '$like', '$null'],
-      allowedEager: '[ceos, clients]',
+      whitelist: ['$eager', '$joinEager', '$joinRelation', '$modifyEager', '$mergeEager', '$between', '$notBetween', '$containsKey', '$contains', '$contained', '$any', '$all', '$noSelect', '$like', '$null', '$modify', '$allowRefs'],
+      allowedEager: '[ceos, clients, employees]',
       eagerFilters: [
         {
           expression: 'ceos',
@@ -154,7 +172,7 @@ const app = feathers()
     service({
       model: Employee,
       multi: ['create'],
-      whitelist: ['$eager', '$joinRelation', '$joinEager', '$like'],
+      whitelist: ['$eager', '$joinRelation', '$joinEager', '$like', '$allowRefs'],
       allowedEager: 'company',
       eagerFilters: {
         expression: 'ltd',
@@ -169,6 +187,7 @@ const app = feathers()
     '/clients',
     service({
       model: Client,
+      multi: ['remove'],
       allowedEager: 'company',
       events: ['testing']
     })
@@ -179,6 +198,7 @@ const peopleRooms = app.service('people-rooms');
 const peopleRoomsCustomIdSeparator = app.service('people-rooms-custom-id-separator');
 const companies = app.service('companies');
 const employees = app.service('employees');
+const clients = app.service('clients');
 
 function clean (done) {
   db.schema
@@ -231,10 +251,12 @@ function clean (done) {
               table.increments('id');
               table.string('name');
               table.integer('ceo');
+              table.enum('size', ['small', 'medium', 'large']);
               table.json('jsonObject');
               table.json('jsonArray');
               table.jsonb('jsonbObject');
               table.jsonb('jsonbArray');
+              table.unique('name');
             });
           });
         });
@@ -245,7 +267,7 @@ function clean (done) {
         return db.schema
           .createTable('employees', table => {
             table.increments('id');
-            table.integer('companyId').references('companies.id');
+            table.integer('companyId');
             table.string('name');
           });
       });
@@ -255,8 +277,9 @@ function clean (done) {
         return db.schema
           .createTable('clients', table => {
             table.increments('id');
-            table.integer('companyId').references('companies.id');
+            table.integer('companyId');
             table.string('name');
+            table.unique('name');
           })
           .then(() => done());
       });
@@ -320,205 +343,101 @@ describe('Feathers Objection Service', () => {
       }
     });
 
-    describe('SQLite', () => {
-      it('Unknown error code', () => {
+    describe('Error Mappings', () => {
+      it('Unknown error', () => {
         const error = new Error();
-        error.code = 'SQLITE_ERROR';
-        error.errno = 999;
         expect(errorHandler.bind(null, error)).to.throw(errors.GeneralError);
       });
 
-      it('BadRequest 1', () => {
-        const error = new Error();
-        error.code = 'SQLITE_ERROR';
-        error.errno = 1;
-        expect(errorHandler.bind(null, error)).to.throw(errors.BadRequest);
+      it('Validation error', () => {
+        const validationErrTypes = ['ModelValidation', 'RelationExpression', 'UnallowedRelation', 'InvalidGraph', 'unknown-thing'];
+        for (const type of validationErrTypes) {
+          const error = new ValidationError({ type });
+          expect(errorHandler.bind(null, error)).to.throw(errors.BadRequest);
+        }
       });
 
-      it('BadRequest 8', () => {
-        const error = new Error();
-        error.code = 'SQLITE_ERROR';
-        error.errno = 8;
-        expect(errorHandler.bind(null, error)).to.throw(errors.BadRequest);
-      });
-
-      it('BadRequest 18', () => {
-        const error = new Error();
-        error.code = 'SQLITE_ERROR';
-        error.errno = 18;
-        expect(errorHandler.bind(null, error)).to.throw(errors.BadRequest);
-      });
-
-      it('BadRequest 19', () => {
-        const error = new Error();
-        error.code = 'SQLITE_ERROR';
-        error.errno = 19;
-        expect(errorHandler.bind(null, error)).to.throw(errors.BadRequest);
-      });
-
-      it('BadRequest 20', () => {
-        const error = new Error();
-        error.code = 'SQLITE_ERROR';
-        error.errno = 20;
-        expect(errorHandler.bind(null, error)).to.throw(errors.BadRequest);
-      });
-
-      it('Unavailable 2', () => {
-        const error = new Error();
-        error.code = 'SQLITE_ERROR';
-        error.errno = 2;
-        expect(errorHandler.bind(null, error)).to.throw(errors.Unavailable);
-      });
-
-      it('Forbidden 3', () => {
-        const error = new Error();
-        error.code = 'SQLITE_ERROR';
-        error.errno = 3;
-        expect(errorHandler.bind(null, error)).to.throw(errors.Forbidden);
-      });
-
-      it('Forbidden 23', () => {
-        const error = new Error();
-        error.code = 'SQLITE_ERROR';
-        error.errno = 23;
-        expect(errorHandler.bind(null, error)).to.throw(errors.Forbidden);
-      });
-
-      it('NotFound 12', () => {
-        const error = new Error();
-        error.code = 'SQLITE_ERROR';
-        error.errno = 12;
-        expect(errorHandler.bind(null, error)).to.throw(errors.NotFound);
-      });
-    });
-
-    describe('Objection', () => {
-      it('Unknown error code', () => {
-        const error = new Error();
-        error.statusCode = 999;
-        expect(errorHandler.bind(null, error)).to.throw(errors.GeneralError);
-      });
-
-      it('BadRequest 400', () => {
-        const error = new Error();
-        error.statusCode = 400;
-        expect(errorHandler.bind(null, error)).to.throw(errors.BadRequest);
-      });
-
-      it('NotAuthenticated 401', () => {
-        const error = new Error();
-        error.statusCode = 401;
-        expect(errorHandler.bind(null, error)).to.throw(errors.NotAuthenticated);
-      });
-
-      it('PaymentError 402', () => {
-        const error = new Error();
-        error.statusCode = 402;
-        expect(errorHandler.bind(null, error)).to.throw(errors.PaymentError);
-      });
-
-      it('Forbidden 403', () => {
-        const error = new Error();
-        error.statusCode = 403;
-        expect(errorHandler.bind(null, error)).to.throw(errors.Forbidden);
-      });
-
-      it('NotFound 404', () => {
-        const error = new Error();
-        error.statusCode = 404;
+      it('NotFound error', () => {
+        const error = new NotFoundError();
         expect(errorHandler.bind(null, error)).to.throw(errors.NotFound);
       });
 
-      it('MethodNotAllowed 405', () => {
-        const error = new Error();
-        error.statusCode = 405;
-        expect(errorHandler.bind(null, error)).to.throw(errors.MethodNotAllowed);
-      });
+      it('UniqueViolation error', () => {
+        const error = new UniqueViolationError({
+          nativeError: new Error(),
+          client: 'sqlite',
+          table: 'tableName',
+          columns: ['columnName']
+        });
 
-      it('NotAcceptable 406', () => {
-        const error = new Error();
-        error.statusCode = 406;
-        expect(errorHandler.bind(null, error)).to.throw(errors.NotAcceptable);
-      });
-
-      it('Timeout 408', () => {
-        const error = new Error();
-        error.statusCode = 408;
-        expect(errorHandler.bind(null, error)).to.throw(errors.Timeout);
-      });
-
-      it('Conflict 409', () => {
-        const error = new Error();
-        error.statusCode = 409;
         expect(errorHandler.bind(null, error)).to.throw(errors.Conflict);
       });
 
-      it('Unprocessable 422', () => {
-        const error = new Error();
-        error.statusCode = 422;
-        expect(errorHandler.bind(null, error)).to.throw(errors.Unprocessable);
+      it('UniqueViolation error mysql', () => {
+        const error = new UniqueViolationError({
+          nativeError: { sqlMessage: 'test' },
+          client: 'mysql',
+          table: undefined,
+          columns: undefined,
+          constraint: 'test_constraint'
+        });
+
+        expect(errorHandler.bind(null, error)).to.throw(error.Conflict, 'test');
       });
 
-      it('GeneralError 500', () => {
-        const error = new Error();
-        error.statusCode = 500;
+      it('ConstraintViolation error', () => {
+        const error = new ConstraintViolationError({
+          nativeError: new Error(),
+          client: 'sqlite'
+        });
+
+        expect(errorHandler.bind(null, error)).to.throw(errors.Conflict);
+      });
+
+      it('NotNullViolation error', () => {
+        const error = new NotNullViolationError({
+          nativeError: new Error(),
+          client: 'sqlite',
+          column: 'columnName'
+        });
+
+        expect(errorHandler.bind(null, error)).to.throw(errors.BadRequest);
+      });
+
+      it('ForeignKeyViolation error', () => {
+        const error = new ForeignKeyViolationError({
+          nativeError: new Error(),
+          client: 'sqlite'
+        });
+
+        expect(errorHandler.bind(null, error)).to.throw(errors.Conflict);
+      });
+
+      it('CheckViolation error', () => {
+        const error = new CheckViolationError({
+          nativeError: new Error(),
+          client: 'sqlite'
+        });
+
+        expect(errorHandler.bind(null, error)).to.throw(errors.BadRequest);
+      });
+
+      it('Data error', () => {
+        const error = new DataError({
+          nativeError: new Error(),
+          client: 'sqlite'
+        });
+
+        expect(errorHandler.bind(null, error)).to.throw(errors.BadRequest);
+      });
+
+      it('Database error', () => {
+        const error = new DBError({
+          nativeError: new Error(),
+          client: 'sqlite'
+        });
+
         expect(errorHandler.bind(null, error)).to.throw(errors.GeneralError);
-      });
-
-      it('NotImplemented 501', () => {
-        const error = new Error();
-        error.statusCode = 501;
-        expect(errorHandler.bind(null, error)).to.throw(errors.NotImplemented);
-      });
-
-      it('Unavailable 503', () => {
-        const error = new Error();
-        error.statusCode = 503;
-        expect(errorHandler.bind(null, error)).to.throw(errors.Unavailable);
-      });
-    });
-
-    describe('Postgres', () => {
-      it('Unknown error code', () => {
-        const error = new Error();
-        error.code = '999';
-        expect(errorHandler.bind(null, error)).to.throw(errors.GeneralError);
-      });
-
-      it('Forbidden 28', () => {
-        const error = new Error();
-        error.code = '28';
-        expect(errorHandler.bind(null, error)).to.throw(errors.Forbidden);
-      });
-
-      it('Forbidden 42', () => {
-        const error = new Error();
-        error.code = '42';
-        expect(errorHandler.bind(null, error)).to.throw(errors.Forbidden);
-      });
-
-      it('BadRequest 20', () => {
-        const error = new Error();
-        error.code = '20';
-        expect(errorHandler.bind(null, error)).to.throw(errors.BadRequest);
-      });
-
-      it('BadRequest 21', () => {
-        const error = new Error();
-        error.code = '21';
-        expect(errorHandler.bind(null, error)).to.throw(errors.BadRequest);
-      });
-
-      it('BadRequest 22', () => {
-        const error = new Error();
-        error.code = '22';
-        expect(errorHandler.bind(null, error)).to.throw(errors.BadRequest);
-      });
-
-      it('BadRequest 23', () => {
-        const error = new Error();
-        error.code = '23';
-        expect(errorHandler.bind(null, error)).to.throw(errors.BadRequest);
       });
     });
   });
@@ -682,6 +601,13 @@ describe('Feathers Objection Service', () => {
       });
     });
 
+    it('allows patch multiple records with patched keys in complex query', () => {
+      return peopleRooms.patch(null, { admin: false }, { query: { $and: [{ admin: true }] } }).then(data => {
+        expect(data).to.be.instanceof(Array);
+        expect(data.length).to.equal(3);
+      });
+    });
+
     it('patch with partial id throws an error', () => {
       return peopleRooms.patch([2], { admin: false }).then(() => {
         throw new Error('Should never get here');
@@ -717,6 +643,20 @@ describe('Feathers Objection Service', () => {
         return peopleRooms.find().then(data => {
           expect(data.length).to.equal(2);
         });
+      });
+    });
+
+    it('allows get queries with $select', () => {
+      return peopleRooms.get([2, 2], { query: { $select: ['admin'] } }).then(data => {
+        expect(data.admin).to.equal(1);
+      });
+    });
+
+    it('allows find queries with $select', () => {
+      return peopleRooms.find({ query: { roomId: 2, $select: ['admin'] } }).then(data => {
+        expect(data.length).to.equal(2);
+        expect(data[0].admin).to.equal(0);
+        expect(data[1].admin).to.equal(1);
       });
     });
   });
@@ -763,9 +703,9 @@ describe('Feathers Objection Service', () => {
     after(async () => {
       await people.remove(ids.ceo.id);
 
-      for (const company of ids.companies) { await companies.remove(company.id); }
-
       for (const employee of ids.employees) { await employees.remove(employee.id); }
+
+      for (const company of ids.companies) { await companies.remove(company.id); }
     });
 
     it('allows eager queries', () => {
@@ -787,6 +727,13 @@ describe('Feathers Objection Service', () => {
       });
     });
 
+    it('allows mergeEager queries with joinEager', () => {
+      return companies.find({ query: { $joinEager: 'employees', $mergeEager: 'ceos', 'employees.name': { $like: '%' } }, mergeAllowEager: '[employees, ceos]' }).then(data => {
+        expect(data[0].employees).to.be.ok;
+        expect(data[0].ceos).to.be.ok;
+      });
+    });
+
     it('allows modifyEager queries', () => {
       return companies.find({ query: { $eager: 'employees', $modifyEager: { employees: { name: 'John' } } }, mergeAllowEager: 'employees' }).then(data => {
         expect(data[0].employees.length).to.equal(2);
@@ -803,8 +750,8 @@ describe('Feathers Objection Service', () => {
     });
 
     it('disallow eager queries', () => {
-      return companies
-        .find({ query: { $eager: 'employees' } })
+      return people
+        .find({ query: { $eager: 'company' } })
         .then(data => {
           throw new Error('Should not reach here');
         })
@@ -815,29 +762,60 @@ describe('Feathers Objection Service', () => {
   });
 
   describe('Join Eager/Relation queries', () => {
+    const ids = {};
+
     before(async () => {
-      const data = await companies
+      ids.ceo = await people
+        .create({
+          name: 'Snoop',
+          age: 20
+        });
+
+      ids.companies = await companies
         .create([
           {
-            name: 'Google'
+            name: 'Google',
+            ceo: ids.ceo.id
           },
           {
-            name: 'Apple'
+            name: 'Apple',
+            ceo: ids.ceo.id
           }
         ]);
 
-      const [google, apple] = data;
-      await employees
+      const [google, apple] = ids.companies;
+
+      ids.employees = await employees
         .create([
           {
-            name: 'Luke',
+            name: 'D',
             companyId: google.id
           },
           {
-            name: 'Yoda',
+            name: 'C',
+            companyId: google.id
+          },
+          {
+            name: 'B',
+            companyId: apple.id
+          },
+          {
+            name: 'A',
             companyId: apple.id
           }
         ]);
+    });
+
+    after(async () => {
+      await people.remove(ids.ceo.id);
+
+      for (const employee of ids.employees) { await employees.remove(employee.id); }
+
+      for (const company of ids.companies) { await companies.remove(company.id); }
+    });
+
+    afterEach(async () => {
+      employees.options.paginate = {};
     });
 
     it('allows joinEager queries', () => {
@@ -853,13 +831,34 @@ describe('Feathers Objection Service', () => {
           query: {
             $joinEager: 'company',
             'company.name': {
-              $like: 'google'
+              $like: 'Google'
             }
           }
         })
         .then(data => {
-          expect(data.length).to.equal(1);
+          expect(data.length).to.equal(2);
           expect(data[0].company.name).to.equal('Google');
+        });
+    });
+
+    it('allows filtering by relation field with paginate joinEager queries', () => {
+      employees.options.paginate = {
+        default: 1,
+        max: 2
+      };
+      return employees
+        .find({
+          query: {
+            $joinEager: 'company',
+            'company.name': {
+              $like: 'Google'
+            }
+          }
+        })
+        .then(data => {
+          expect(data.total).to.be.equal(2);
+          expect(data.data.length).to.equal(1);
+          expect(data.data[0].company.name).to.equal('Google');
         });
     });
 
@@ -883,13 +882,16 @@ describe('Feathers Objection Service', () => {
           query: {
             $joinRelation: 'company',
             'company.name': {
-              $like: 'google'
+              $like: 'Google'
+            },
+            $sort: {
+              'employees.name': 1
             }
           }
         })
         .then(data => {
-          expect(data.length).to.equal(1);
-          expect(data[0].name).to.equal('Luke');
+          expect(data.length).to.equal(2);
+          expect(data[0].name).to.equal('C');
         });
     });
 
@@ -900,20 +902,58 @@ describe('Feathers Objection Service', () => {
             $eager: 'company',
             $joinRelation: 'company',
             'company.name': {
-              $like: 'google'
+              $like: 'Google'
             }
           }
         })
         .then(data => {
-          expect(data.length).to.equal(1);
+          expect(data.length).to.equal(2);
           expect(data[0].company.name).to.equal('Google');
+        });
+    });
+
+    it('allows joinRelation queries, eager with sort by relation', () => {
+      return employees
+        .find({
+          query: {
+            $select: ['employees.*', 'company.name'],
+            $eager: 'company',
+            $joinRelation: 'company',
+            $sort: {
+              'employees.name': 1,
+              'company.name': 1
+            }
+          }
+        })
+        .then(data => {
+          expect(data.length).to.equal(4);
+          expect(data[0].name).to.equal('A');
+          expect(data[0].company.name).to.equal('Apple');
+        });
+    });
+
+    it('allows joinRelation queries, eager with sort and sorted relation', () => {
+      return employees
+        .find({
+          query: {
+            $select: ['employees.*', 'company.name'],
+            $eager: 'company(orderByName)',
+            $joinRelation: 'company',
+            $sort: {
+              'employees.name': 1
+            }
+          }
+        })
+        .then(data => {
+          expect(data.length).to.equal(4);
+          expect(data[0].name).to.equal('A');
+          expect(data[0].company.name).to.equal('Apple');
         });
     });
   });
 
   describe('Graph Insert Queries', () => {
     before(async () => {
-      await companies.remove(null);
       await companies
         .create([
           {
@@ -931,6 +971,11 @@ describe('Feathers Objection Service', () => {
             name: 'Apple'
           }
         ]);
+    });
+
+    after(async () => {
+      await clients.remove(null);
+      await companies.remove(null);
     });
 
     it('allows insertGraph queries', () => {
@@ -955,18 +1000,18 @@ describe('Feathers Objection Service', () => {
       return companies
         .create([
           {
-            name: 'Google',
+            name: 'Facebook',
             clients: [
               {
-                name: 'Dan Davis'
+                name: 'Danny Lapierre'
               },
               {
-                name: 'Ken Patrick'
+                name: 'Kirck Filty'
               }
             ]
           },
           {
-            name: 'Apple'
+            name: 'Yubico'
           }
         ]).then(() => {
           companies.createUseUpsertGraph = false;
@@ -982,17 +1027,16 @@ describe('Feathers Objection Service', () => {
   describe('Graph Upsert Queries', () => {
     let ceo;
     let google;
+    let apple;
 
     beforeEach(async () => {
-      await companies.remove(null);
-
       ceo = await people
         .create({
           name: 'Snoop',
           age: 20
         });
 
-      [google] = await companies
+      [google, apple] = await companies
         .create([
           {
             name: 'Google',
@@ -1010,20 +1054,26 @@ describe('Feathers Objection Service', () => {
     });
 
     afterEach(async () => {
-      await people.remove(ceo.id);
+      const persons = await people.find();
+
+      for (const person of persons) { await people.remove(person.id); }
+
+      await clients.remove(null);
+      await companies.remove(null);
     });
 
     it('allows upsertGraph queries on update', () => {
-      const newClients = (google.clients) ? google.clients.concat([{
-        name: 'Ken Patrick'
-      }]) : [];
+      const newClients = (google.clients)
+        ? google.clients.concat([{
+          name: 'Ken Patrick'
+        }])
+        : [];
 
       return companies
         .update(google.id, {
-          id: google.id,
           name: 'Alphabet',
           clients: newClients
-        }, { query: { $eager: 'clients' } }).then(() => {
+        }).then(() => { // NOTE: Do not need $eager anymore
           return companies.find({ query: { $eager: 'clients' } }).then(data => {
             expect(data[0].name).equal('Alphabet');
             expect(data[0].clients).to.be.an('array');
@@ -1032,10 +1082,52 @@ describe('Feathers Objection Service', () => {
         });
     });
 
+    it('forbid upsertGraph if data do not match update item', () => {
+      const newClients = (google.clients)
+        ? google.clients.concat([{
+          name: 'Ken Patrick'
+        }])
+        : [];
+
+      return companies
+        .update(apple.id, {
+          id: google.id,
+          name: 'Alphabet',
+          clients: newClients
+        }).then(() => {
+          throw new Error('Should never get here');
+        }).catch(function (error) {
+          expect(error).to.be.ok;
+          expect(error instanceof errors.BadRequest).to.be.ok;
+        });
+    });
+
+    it('forbid upsertGraph if data do not match patch item', () => {
+      const newClients = (google.clients)
+        ? google.clients.concat([{
+          name: 'Ken Patrick'
+        }])
+        : [];
+
+      return companies
+        .patch(apple.id, {
+          id: google.id,
+          name: 'Alphabet',
+          clients: newClients
+        }).then(() => {
+          throw new Error('Should never get here');
+        }).catch(function (error) {
+          expect(error).to.be.ok;
+          expect(error instanceof errors.BadRequest).to.be.ok;
+        });
+    });
+
     it('allows upsertGraph queries on patch', () => {
-      const newClients = (google.clients) ? google.clients.concat([{
-        name: 'Ken Patrick'
-      }]) : [];
+      const newClients = (google.clients)
+        ? google.clients.concat([{
+          name: 'Ken Patrick'
+        }])
+        : [];
 
       return companies
         .patch(google.id, {
@@ -1050,6 +1142,25 @@ describe('Feathers Objection Service', () => {
             expect(data[0].clients).to.be.an('array');
             expect(data[0].clients).to.have.lengthOf(2);
           });
+        });
+    });
+
+    it('allows upsertGraph queries on patch with query param', () => {
+      const newClients = (google.clients)
+        ? google.clients.concat([{
+          name: 'Ken Patrick'
+        }])
+        : [];
+
+      return companies
+        .patch(google.id, {
+          name: 'Google Alphabet',
+          clients: newClients
+        }, { query: { name: 'microsoft' } }).then(() => {
+          throw new Error('Should never get here');
+        }).catch(function (error) {
+          expect(error).to.be.ok;
+          expect(error instanceof errors.NotFound).to.be.ok;
         });
     });
 
@@ -1132,6 +1243,167 @@ describe('Feathers Objection Service', () => {
     });
   });
 
+  describe('$not method', () => {
+    before(async () => {
+      const persons = await people.find();
+
+      for (const person of persons) { await people.remove(person.id); }
+
+      await people
+        .create([
+          {
+            name: 'John',
+            age: 23
+          },
+          {
+            name: 'Dave',
+            age: 32
+          },
+          {
+            name: 'Dada',
+            age: 1
+          }
+        ]);
+    });
+
+    it('$not in query', () => {
+      return people.find({ query: { $not: { name: 'John' } } }).then(data => {
+        expect(data.length).to.be.equal(2);
+        expect(data[0].name).to.be.equal('Dave');
+      });
+    });
+
+    it('$not with implicit $and in query', () => {
+      return people.find({ query: { $not: [{ name: 'John' }, { name: 'Dave' }] } }).then(data => {
+        expect(data.length).to.be.equal(3);
+        expect(data[0].name).to.be.equal('John');
+      });
+    });
+
+    it('$not with $and in query', () => {
+      return people.find({ query: { $not: { $and: [{ name: 'John' }, { name: 'Dave' }] } } }).then(data => {
+        expect(data.length).to.be.equal(3);
+        expect(data[0].name).to.be.equal('John');
+      });
+    });
+
+    it('$not with $or in query', () => {
+      return people.find({ query: { $not: { $or: [{ name: 'John' }, { name: 'Dave' }] } } }).then(data => {
+        expect(data.length).to.be.equal(1);
+        expect(data[0].name).to.be.equal('Dada');
+      });
+    });
+
+    it('$not with $null in query', () => {
+      return people.find({ query: { $not: { name: { $null: true } } } }).then(data => {
+        expect(data.length).to.be.equal(3);
+      });
+    });
+  });
+
+  describe('select with mutating methods', () => {
+    it('$select with aliases and update', async () => {
+      const p = await people
+        .create(
+          {
+            name: 'Dave',
+            age: 1
+          }
+        );
+      return people.update(p.id, { age: 3, name: 'John' }, { query: { $select: ['people.name as n'] } }).then(data => {
+        expect(data.n).to.be.equal('John');
+        expect(data.age).to.be.equal(undefined);
+      });
+    });
+
+    it('$select and update upsert', async () => {
+      const p = await people
+        .create(
+          {
+            name: 'Dave',
+            age: 1
+          }
+        );
+      return people.update(p.id, { id: p.id, age: 3, name: 'John' }, { query: { $select: ['people.age', 'people.name'] }, mergeAllowUpsert: 'company' }).then(data => {
+        expect(data.name).to.be.equal('John');
+        expect(data.age).to.be.equal(3);
+      });
+    });
+
+    // it.todo('$select and update upsert with relation fetching');
+
+    it('$select and patch', async () => {
+      const p = await people
+        .create(
+          {
+            name: 'Dave',
+            age: 1
+          }
+        );
+      return people.patch(p.id, { name: 'John' }, { query: { $select: ['name as n'] } }).then(data => {
+        expect(data.n).to.be.equal('John');
+        expect(data.age).to.be.equal(undefined);
+      });
+    });
+
+    it('$select all and patch upsert', async () => {
+      const p = await people
+        .create(
+          {
+            name: 'Dave',
+            age: 1
+          }
+        );
+      return people.patch(p.id, { name: 'John' }, { query: { $select: ['people.*'] }, mergeAllowUpsert: 'company' }).then(data => {
+        expect(data.name).to.be.equal('John');
+        expect(data.age).to.be.equal(1);
+      });
+    });
+
+    it('$select and patch upsert', async () => {
+      const p = await people
+        .create(
+          {
+            name: 'Dave',
+            age: 1
+          }
+        );
+      return people.patch(p.id, { id: p.id, name: 'John' }, { query: { $select: ['age'] }, mergeAllowUpsert: 'company' }).then(data => {
+        expect(data.name).to.be.equal(undefined);
+        expect(data.age).to.be.equal(1);
+      });
+    });
+
+    it('$noSelect and patch', async () => {
+      const p = await people
+        .create(
+          {
+            name: 'Dave',
+            age: 1
+          }
+        );
+      return people.patch(p.id, { name: 'John' }, { query: { $noSelect: true, $select: ['name as n'] } }).then(data => {
+        expect(data.name).to.be.equal('John');
+        expect(data.n).to.be.equal(undefined);
+        expect(data.age).to.be.equal(undefined);
+      });
+    });
+
+    it('$noSelect and update', async () => {
+      const p = await people
+        .create(
+          {
+            name: 'Dave',
+            age: 1
+          }
+        );
+      return people.update(p.id, { age: 3, name: 'John' }, { query: { $noSelect: true, $select: ['name as n'] } }).then(data => {
+        expect(data.n).to.be.equal(undefined);
+        expect(data.age).to.be.equal(3);
+      });
+    });
+  });
+
   describe('between & not between operators', () => {
     before(async () => {
       await people
@@ -1169,6 +1441,12 @@ describe('Feathers Objection Service', () => {
       });
     });
 
+    it('not Between using $not', () => {
+      return people.find({ query: { age: { $not: { $between: [0, 100] } } } }).then(data => {
+        expect(data[0].name).to.be.equal('John');
+      });
+    });
+
     it('$notBetween - string', () => {
       return people.find({ query: { age: { $notBetween: '[0, 100]' } } }).then(data => {
         expect(data[0].name).to.be.equal('John');
@@ -1199,6 +1477,10 @@ describe('Feathers Objection Service', () => {
         ]);
     });
 
+    after(async () => {
+      await companies.remove(null);
+    });
+
     it('object', () => {
       return companies.find({ query: { jsonObject: { $ne: null } } }).then(data => {
         expect(data[0].jsonObject.numberField).to.equal(1.5);
@@ -1211,7 +1493,7 @@ describe('Feathers Objection Service', () => {
       }).catch(function (error) {
         expect(error).to.be.ok;
         expect(error instanceof errors.GeneralError).to.be.ok;
-        expect(error.message).to.equal('select `companies`.* from `companies` where CAST(`companies`.`jsonObject`#>>\'{numberField}\' AS text) = 1.5 - SQLITE_ERROR: unrecognized token: "#"');
+        expect(error[ERROR].message).to.equal('select `companies`.* from `companies` where CAST(`companies`.`jsonObject`#>>\'{numberField}\' AS text) = 1.5 - SQLITE_ERROR: unrecognized token: "#"');
       });
     });
 
@@ -1221,7 +1503,7 @@ describe('Feathers Objection Service', () => {
       }).catch(function (error) {
         expect(error).to.be.ok;
         expect(error instanceof errors.GeneralError).to.be.ok;
-        expect(error.message).to.equal('select `companies`.* from `companies` where CAST(`companies`.`jsonObject`#>>\'{numberField}\' AS text) > 1.5 - SQLITE_ERROR: unrecognized token: "#"');
+        expect(error[ERROR].message).to.equal('select `companies`.* from `companies` where CAST(`companies`.`jsonObject`#>>\'{numberField}\' AS text) > 1.5 - SQLITE_ERROR: unrecognized token: "#"');
       });
     });
 
@@ -1231,7 +1513,7 @@ describe('Feathers Objection Service', () => {
       }).catch(function (error) {
         expect(error).to.be.ok;
         expect(error instanceof errors.GeneralError).to.be.ok;
-        expect(error.message).to.equal('select `companies`.* from `companies` where CAST(`companies`.`jsonObject`#>>\'{objectField,object}\' AS text) = \'string in jsonObject.objectField.object\' - SQLITE_ERROR: unrecognized token: "#"');
+        expect(error[ERROR].message).to.equal('select `companies`.* from `companies` where CAST(`companies`.`jsonObject`#>>\'{objectField,object}\' AS text) = \'string in jsonObject.objectField.object\' - SQLITE_ERROR: unrecognized token: "#"');
       });
     });
 
@@ -1247,7 +1529,7 @@ describe('Feathers Objection Service', () => {
       }).catch(function (error) {
         expect(error).to.be.ok;
         expect(error instanceof errors.GeneralError).to.be.ok;
-        expect(error.message).to.equal('select `companies`.* from `companies` where CAST(`companies`.`jsonArray`#>>\'{0,objectField,object}\' AS text) = \'I\'\'m string in jsonArray[0].objectField.object\' - SQLITE_ERROR: unrecognized token: "#"');
+        expect(error[ERROR].message).to.equal('select `companies`.* from `companies` where CAST(`companies`.`jsonArray`#>>\'{0,objectField,object}\' AS text) = \'I\'\'m string in jsonArray[0].objectField.object\' - SQLITE_ERROR: unrecognized token: "#"');
       });
     });
   });
@@ -1258,7 +1540,7 @@ describe('Feathers Objection Service', () => {
         .create([
           {
             name: 'Google',
-            jsonObject: {
+            jsonbObject: {
               stringField: 'string',
               numberField: 1.5,
               objectField: {
@@ -1273,6 +1555,24 @@ describe('Feathers Objection Service', () => {
                 }
               }
             ]
+          },
+          {
+            name: 'Apple',
+            jsonbObject: {
+              stringField: 'string2',
+              numberField: 1,
+              objectField: {
+                object: 'string in jsonObject.objectField.object2'
+              },
+              'first.founder': 'Dave'
+            },
+            jsonArray: [
+              {
+                objectField: {
+                  object: 'I\'m string in jsonArray[0].objectField.object2'
+                }
+              }
+            ]
           }
         ]);
     });
@@ -1282,43 +1582,43 @@ describe('Feathers Objection Service', () => {
     });
 
     it('object', () => {
-      return companies.find({ query: { jsonObject: { $ne: null } } }).then(data => {
-        expect(data[0].jsonObject.stringField).to.equal('string');
+      return companies.find({ query: { jsonbObject: { $ne: null } } }).then(data => {
+        expect(data[0].jsonbObject.stringField).to.equal('string');
       });
     });
 
     it('object stringField', () => {
-      return companies.find({ query: { jsonObject: { stringField: 'string' } } }).then(data => {
-        expect(data[0].jsonObject.stringField).to.equal('string');
+      return companies.find({ query: { jsonbObject: { stringField: 'string' } } }).then(data => {
+        expect(data[0].jsonbObject.stringField).to.equal('string');
       });
     });
 
     it('object stringField $like', () => {
-      return companies.find({ query: { jsonObject: { stringField: { $like: 'str%' } } } }).then(data => {
-        expect(data[0].jsonObject.stringField).to.equal('string');
+      return companies.find({ query: { jsonbObject: { stringField: { $like: 'str%' } } } }).then(data => {
+        expect(data[0].jsonbObject.stringField).to.equal('string');
       });
     });
 
     it('object numberField $between', () => {
-      return companies.find({ query: { jsonObject: { numberField: { $between: [1, 2] } } } }).then(data => {
-        expect(data[0].jsonObject.stringField).to.equal('string');
+      return companies.find({ query: { jsonbObject: { numberField: { $between: [1, 2] } } } }).then(data => {
+        expect(data[0].jsonbObject.stringField).to.equal('string');
       });
     });
 
     it('object numberField', () => {
-      return companies.find({ query: { jsonObject: { numberField: 1.5 } } }).then(data => {
-        expect(data[0].jsonObject.numberField).to.equal(1.5);
+      return companies.find({ query: { jsonbObject: { numberField: 1.5 } } }).then(data => {
+        expect(data[0].jsonbObject.numberField).to.equal(1.5);
       });
     });
 
     it('object numberField $gt', () => {
-      return companies.find({ query: { jsonObject: { numberField: { $gt: 1.4 } } } }).then(data => {
+      return companies.find({ query: { jsonbObject: { numberField: { $gt: 1.4 } } } }).then(data => {
         expect(data[0].jsonArray[0].objectField.object).to.equal('I\'m string in jsonArray[0].objectField.object');
       });
     });
 
     it('object nested object', () => {
-      return companies.find({ query: { jsonObject: { 'objectField.object': 'string in jsonObject.objectField.object' } } }).then(data => {
+      return companies.find({ query: { jsonbObject: { 'objectField.object': 'string in jsonObject.objectField.object' } } }).then(data => {
         expect(data[0].jsonArray[0].objectField.object).to.equal('I\'m string in jsonArray[0].objectField.object');
       });
     });
@@ -1336,14 +1636,28 @@ describe('Feathers Objection Service', () => {
     });
 
     it('dot in property name', () => {
-      return companies.find({ query: { jsonObject: { '(first.founder)': 'John' } } }).then(data => {
-        expect(data[0].jsonObject['first.founder']).to.equal('John');
+      return companies.find({ query: { jsonbObject: { '(first.founder)': 'John' } } }).then(data => {
+        expect(data[0].jsonbObject['first.founder']).to.equal('John');
       });
     });
 
     it('dot in property name with brackets', () => {
-      return companies.find({ query: { jsonObject: { '[first.founder]': 'John' } } }).then(data => {
-        expect(data[0].jsonObject['first.founder']).to.equal('John');
+      return companies.find({ query: { jsonbObject: { '[first.founder]': 'John' } } }).then(data => {
+        expect(data[0].jsonbObject['first.founder']).to.equal('John');
+      });
+    });
+
+    it('select & sort with ref', () => {
+      return companies.find({
+        query: {
+          $select: ['name', 'ref(jsonbObject:numberField)', 'ref(jsonbObject:objectField.object) as object'],
+          $sort: { 'ref(jsonbObject:numberField)': 1 }
+        }
+      }).then(data => {
+        expect(data.length).to.equal(2);
+        expect(data[0].name).to.equal('Apple');
+        expect(data[0]['jsonbObject:numberField']).to.equal(1);
+        expect(data[0].object).to.equal('string in jsonObject.objectField.object2');
       });
     });
   });
@@ -1477,17 +1791,166 @@ describe('Feathers Objection Service', () => {
         });
       });
     });
+
+    it('works with atomic', () => {
+      return people.create({ name: 'Rollback' }, { transaction, atomic: true }).then(() => {
+        expect(transaction.trx.isCompleted()).to.equal(false); // Atomic must be ignored and transaction still running
+        return transaction.trx.rollback().then(() => {
+          return people.find({ query: { name: 'Rollback' } }).then((data) => {
+            expect(data.length).to.equal(0);
+          });
+        });
+      });
+    });
+  });
+
+  describe('Atomic Transactions', () => {
+    before(async () => {
+      await companies
+        .create([
+          {
+            name: 'Google',
+            clients: [
+              {
+                name: 'Dan Davis'
+              },
+              {
+                name: 'Ken Patrick'
+              }
+            ]
+          },
+          {
+            name: 'Apple'
+          }
+        ]);
+    });
+
+    after(async () => {
+      await clients.remove(null);
+      await companies.remove(null);
+    });
+
+    it('Rollback on sub insert failure', () => {
+      // Dan Davis already exists
+      return companies.create({ name: 'Compaq', clients: [{ name: 'Dan Davis' }] }, { atomic: true }).catch((error) => {
+        expect(error instanceof errors.Conflict).to.be.ok;
+        expect(error[ERROR].message).to.match(/SQLITE_CONSTRAINT: UNIQUE/);
+        return companies.find({ query: { name: 'Compaq', $eager: 'clients' } }).then(
+          (data) => {
+            expect(data.length).to.equal(0);
+          });
+      });
+    });
+
+    it('Rollback on multi insert failure', () => {
+      // Google already exists
+      return companies.create([{ name: 'Google' }, { name: 'Compaq' }], { atomic: true }).catch((error) => {
+        expect(error instanceof errors.Conflict).to.be.ok;
+        expect(error[ERROR].message).to.match(/SQLITE_CONSTRAINT: UNIQUE/);
+        return companies.find({ query: { name: 'Compaq' } }).then(
+          (data) => {
+            expect(data.length).to.equal(0);
+          });
+      });
+    });
+
+    it('Rollback on update failure', () => {
+      // Dan Davis appears twice, so clients must stay as it is
+      return companies.find({ query: { name: 'Google' } }).then(data => {
+        return companies.update(data[0].id, {
+          name: 'Google',
+          clients: [
+            {
+              name: 'Dan Davis'
+            },
+            {
+              name: 'Dan Davis'
+            },
+            {
+              name: 'Kirk Maelström'
+            }
+          ]
+        }, { atomic: true }).catch((error) => {
+          expect(error instanceof errors.Conflict).to.be.ok;
+          expect(error[ERROR].message).to.match(/SQLITE_CONSTRAINT: UNIQUE/);
+          return companies.find({ query: { name: 'Google', $eager: 'clients' } }).then(
+            (data) => {
+              expect(data.length).to.equal(1);
+              expect(data[0].clients.length).to.equal(2);
+              expect(data[0].clients[0].name).to.equal('Dan Davis');
+              expect(data[0].clients[1].name).to.equal('Ken Patrick');
+            });
+        });
+      });
+    });
+
+    it('Rollback on patch failure', () => {
+      // Dan Davis appears twice, so clients must stay as it is
+      return companies.find({ query: { name: 'Google' } }).then(data => {
+        return companies.patch(data[0].id, {
+          clients: [
+            {
+              name: 'Dan Davis'
+            },
+            {
+              name: 'Dan Davis'
+            },
+            {
+              name: 'Kirk Maelström'
+            }
+          ]
+        }, { atomic: true }).catch((error) => {
+          expect(error instanceof UniqueViolationError).to.be.ok;
+          expect(error.message).to.match(/SQLITE_CONSTRAINT: UNIQUE/);
+          return companies.find({ query: { name: 'Google', $eager: 'clients' } }).then(
+            (data) => {
+              expect(data.length).to.equal(1);
+              expect(data[0].clients.length).to.equal(2);
+              expect(data[0].clients[0].name).to.equal('Dan Davis');
+              expect(data[0].clients[1].name).to.equal('Ken Patrick');
+            });
+        });
+      });
+    });
+
+    it('Commit on patch success', () => {
+      // Dan Davis appears twice, so clients must stay as it is
+      return companies.find({ query: { name: 'Google' } }).then(data => {
+        return companies.patch(data[0].id, {
+          clients: [
+            {
+              name: 'Dan David'
+            },
+            {
+              name: 'Dan Davis'
+            },
+            {
+              name: 'Kirk Maelström'
+            }
+          ]
+        }, { atomic: true }).catch((error) => {
+          expect(error instanceof UniqueViolationError).to.be.ok;
+          expect(error.message).to.match(/SQLITE_CONSTRAINT: UNIQUE/);
+          return companies.find({ query: { name: 'Google', $eager: 'clients' } }).then(
+            (data) => {
+              expect(data.length).to.equal(1);
+              expect(data[0].clients.length).to.equal(3);
+              expect(data[0].clients[0].name).to.equal('Dan David');
+              expect(data[0].clients[0].name).to.equal('Dan Davis');
+              expect(data[0].clients[1].name).to.equal('Kirk Maelström');
+            });
+        });
+      });
+    });
   });
 
   describe('$noSelect', () => {
     beforeEach(async () => {
       await companies
-        .create([
-          {
-            name: 'Google',
-            ceo: 1
-          }
-        ]);
+        .create({
+          name: 'Google',
+          ceo: 1
+        });
     });
 
     afterEach(async () => {
@@ -1522,6 +1985,8 @@ describe('Feathers Objection Service', () => {
         }
       }).then(data => {
         expect(data).to.be.ok;
+        expect(data.name).to.equal('Amazon');
+        delete data.name;
         expect(data).to.be.empty;
       });
     });
@@ -1583,6 +2048,377 @@ describe('Feathers Objection Service', () => {
       return companies.find({ query: { ceo: { $null: 'false' } } }).then(data => {
         expect(data.length).to.be.equal(1);
         expect(data[0].name).to.be.equal('Google');
+      });
+    });
+  });
+
+  describe('$modify', () => {
+    const ids = {};
+
+    beforeEach(async () => {
+      ids.companies = await companies
+        .create([
+          {
+            name: 'Google',
+            ceo: 1,
+            size: 'medium'
+          },
+          {
+            name: 'Apple',
+            ceo: null,
+            size: 'large'
+          }
+        ]);
+
+      ids.employees = await employees
+        .create([
+          {
+            name: 'John',
+            companyId: ids.companies[0].id
+          },
+          {
+            name: 'Dave',
+            companyId: ids.companies[1].id
+          }
+        ]);
+    });
+
+    afterEach(async () => {
+      companies.options.paginate = {};
+
+      for (const employee of ids.employees) { await employees.remove(employee.id); }
+
+      await companies.remove(null);
+    });
+
+    it('allow $modify query', () => {
+      return companies.find({ query: { $modify: ['google'] } }).then(data => {
+        expect(data.length).to.be.equal(1);
+        expect(data[0].name).to.be.equal('Google');
+      });
+    });
+
+    it('allow $modify query with paginate', () => {
+      companies.options.paginate = {
+        default: 1,
+        max: 2
+      };
+
+      return companies.find({ query: { $modify: ['google'] } }).then(data => {
+        expect(data.total).to.be.equal(1);
+        expect(data.data.length).to.be.equal(1);
+        expect(data.data[0].name).to.be.equal('Google');
+      });
+    });
+
+    it('allow $modify query with paginate and no results', () => {
+      companies.options.paginate = {
+        default: 1,
+        max: 2
+      };
+
+      return companies.find({ query: { $modify: ['google'], size: 'small' } }).then(data => {
+        expect(data.total).to.be.equal(0);
+        expect(data.data.length).to.be.equal(0);
+      });
+    });
+
+    it('allow $modify query with paginate and eager in modifier', () => {
+      companies.options.paginate = {
+        default: 1,
+        max: 2
+      };
+
+      return companies.find({ query: { $modify: ['withRelation'], $sort: { 'companies.name': -1 } } }).then(data => {
+        expect(data.total).to.be.equal(2);
+        expect(data.data.length).to.be.equal(1);
+        expect(data.data[0].name).to.be.equal('Google');
+        expect(data.data[0].employees.length).to.be.equal(1);
+        expect(data.data[0].employees[0].name).to.be.equal('John');
+      });
+    });
+
+    it('params.modifierFiltersResults=false does not apply count from modify query', () => {
+      companies.options.paginate = {
+        default: 2,
+        max: 2
+      };
+
+      return companies.find({
+        query: { $modify: ['withRelationAndGroupBy'] }, modifierFiltersResults: false
+      }).then(data => {
+        expect(data.total).to.be.equal(2);
+        expect(data.data.length).to.be.equal(2);
+        expect(data.data[0].name).to.be.equal('Google');
+      });
+    });
+
+    it('params.modifierFiltersResults=true applies count from modify query', () => {
+      companies.options.paginate = {
+        default: 2,
+        max: 2
+      };
+
+      return companies.find({
+        query: { $modify: ['withRelationAndGroupBy'] }, modifierFiltersResults: true
+      }).then(data => {
+        expect(data.total).to.be.equal(1); // count result from GROUP BY
+        expect(data.data.length).to.be.equal(2);
+        expect(data.data[0].name).to.be.equal('Google');
+      });
+    });
+
+    it('params.modifierFiltersResults=undefined applies count from modify query', () => {
+      companies.options.paginate = {
+        default: 2,
+        max: 2
+      };
+
+      return companies.find({ query: { $modify: ['withRelationAndGroupBy'] } }).then(data => {
+        expect(data.total).to.be.equal(1); // count result from GROUP BY
+        expect(data.data.length).to.be.equal(2);
+        expect(data.data[0].name).to.be.equal('Google');
+      });
+    });
+
+    it('allow $modify query with paginate, groupBy and joinRelation', () => {
+      companies.options.paginate = {
+        default: 1,
+        max: 2
+      };
+
+      return companies.find({ query: { $modify: ['google'], $joinRelation: 'employees' } }).then(data => {
+        expect(data.total).to.be.equal(1);
+        expect(data.data.length).to.be.equal(1);
+        expect(data.data[0].name).to.be.equal('Google');
+      });
+    });
+
+    it.skip('allow $modify query with paginate, groupBy and eager (not with SQLite)', () => {
+      companies.options.paginate = {
+        default: 1,
+        max: 2
+      };
+
+      return companies.find({ query: { $modify: ['googleWithEager'], $eager: 'employees' } }).then(data => {
+        expect(data.total).to.be.equal(1);
+        expect(data.data.length).to.be.equal(1);
+        expect(data.data[0].name).to.be.equal('Google');
+      });
+    });
+
+    it('allow $modify query as string', () => {
+      return companies.find({ query: { $modify: 'google' } }).then(data => {
+        expect(data.length).to.be.equal(1);
+        expect(data[0].name).to.be.equal('Google');
+      });
+    });
+
+    it('allow $modify query as string with multiple modifiers', () => {
+      return companies.find({ query: { $modify: 'apple,large' } }).then(data => {
+        expect(data.length).to.be.equal(1);
+        expect(data[0].name).to.be.equal('Apple');
+      });
+    });
+
+    it('allow $modify query with serialized array', () => {
+      return companies.find({ query: { $modify: JSON.stringify(['google']) } }).then(data => {
+        expect(data.length).to.be.equal(1);
+        expect(data[0].name).to.be.equal('Google');
+      });
+    });
+
+    it('allow $modify query with serialized object', () => {
+      return companies.find({
+        query: { $modify: JSON.stringify({ apple: true }) }
+      }).then(data => {
+        expect(data.length).to.be.equal(1);
+        expect(data[0].name).to.be.equal('Apple');
+      });
+    });
+
+    it('allow $modify query with args', () => {
+      return companies.find({ query: { $modify: ['large', false] } }).then(data => {
+        expect(data.length).to.be.equal(1);
+        expect(data[0].name).to.be.equal('Apple');
+      });
+    });
+
+    it('allow $modify query with multiple modifiers', () => {
+      return companies.find({ query: { $modify: [['apple', 'large']] } }).then(data => {
+        expect(data.length).to.be.equal(1);
+        expect(data[0].name).to.be.equal('Apple');
+      });
+    });
+
+    it('allow $modify query with multiple modifiers and args', () => {
+      return companies.find({ query: { $modify: [['apple', 'large'], true] } }).then(data => {
+        expect(data.length).to.be.equal(0);
+      });
+    });
+
+    it('allow $modify query with multiple modifiers and different args for each', () => {
+      return companies.find({
+        query: {
+          $modify: {
+            apple: [false],
+            large: [false],
+            withRelation: true
+          }
+        }
+      }).then(data => {
+        expect(data.length).to.be.equal(1);
+        expect(data[0].name).to.be.equal('Apple');
+        expect(data[0].employees.length).to.be.equal(1);
+        expect(data[0].employees[0].name).to.be.equal('Dave');
+      });
+    });
+  });
+
+  describe('Create with ID', () => {
+    beforeEach(async () => {
+      await companies.create({ name: 'Apple' });
+    });
+
+    afterEach(async () => {
+      await companies.remove(null);
+    });
+
+    it('create with id when id is overridden in model', () => {
+      return companies.create({ id: 1, name: 'Google' }).then(data => {
+        expect(data).to.be.ok;
+        expect(data.name).to.be.equal('Google');
+      });
+    });
+  });
+
+  describe('Patch with same field in data & query', () => {
+    let company;
+
+    beforeEach(async () => {
+      company = await companies.create({ name: 'Apple' });
+    });
+
+    afterEach(async () => {
+      await companies.remove(null);
+    });
+
+    it('Patch with id', () => {
+      return companies.patch(company.id, {
+        name: 'Google'
+      }, {
+        query: {
+          name: 'Apple'
+        }
+      }).then(data => {
+        expect(data).to.be.ok;
+        expect(data.name).to.be.equal('Google');
+      });
+    });
+
+    it('Patch without id', () => {
+      return companies.patch(null, {
+        name: 'Google'
+      }, {
+        query: {
+          name: 'Apple'
+        }
+      }).then(data => {
+        expect(data.length).to.be.equal(1);
+        expect(data[0].name).to.be.equal('Google');
+      });
+    });
+  });
+
+  describe('$allowRefs', () => {
+    const ids = {};
+
+    beforeEach(async () => {
+      ids.ceo = await people
+        .create({
+          name: 'Snoop',
+          age: 20
+        });
+
+      ids.companies = await companies
+        .create([
+          {
+            name: 'small',
+            ceo: ids.ceo.id,
+            size: 'small'
+          },
+          {
+            name: 'Apple',
+            ceo: ids.ceo.id,
+            size: 'large'
+          }
+        ]);
+
+      const [small, apple] = ids.companies;
+
+      ids.employees = await employees
+        .create([
+          {
+            name: 'John',
+            companyId: small.id
+          },
+          {
+            name: 'Apple',
+            companyId: apple.id
+          }
+        ]);
+    });
+
+    afterEach(async () => {
+      await people.remove(ids.ceo.id);
+
+      for (const employee of ids.employees) { await employees.remove(employee.id); }
+
+      for (const company of ids.companies) { await companies.remove(company.id); }
+    });
+
+    it('allow allowRefs queries', () => {
+      return companies.find({ query: { name: 'ref(size)', $allowRefs: true } }).then(data => {
+        expect(data.length).to.equal(1);
+        expect(data[0].name).to.equal('small');
+      });
+    });
+
+    it('query with ref when not allowed', () => {
+      return companies.find({ query: { name: 'ref(size)' } }).then(data => {
+        expect(data.length).to.equal(0);
+      });
+    });
+
+    it('patch with ref', () => {
+      return companies.patch(null, { ceo: null }, { query: { name: 'ref(size)', $allowRefs: true } }).then(data => {
+        expect(data.length).to.equal(1);
+        expect(data[0].ceo).to.be.null;
+      });
+    });
+
+    it('remove with ref', () => {
+      return companies.remove(null, { query: { name: 'ref(size)', $allowRefs: true } }).then(data => {
+        expect(data.length).to.equal(1);
+        expect(data[0].name).to.equal('small');
+      });
+    });
+
+    it('joinEager queries with ref', () => {
+      return employees.find({ query: { $joinEager: 'company', 'company.name': 'ref(employees.name)', $allowRefs: true } }).then(data => {
+        expect(data.length).to.equal(1);
+        expect(data[0].name).to.equal('Apple');
+        expect(data[0].company).to.be.ok;
+        expect(data[0].company.name).to.equal('Apple');
+      });
+    });
+
+    it('joinRelation queries with ref', () => {
+      return employees.find({ query: { $eager: 'company', $joinRelation: 'company', 'company.name': 'ref(employees.name)', $allowRefs: true } }).then(data => {
+        expect(data.length).to.equal(1);
+        expect(data[0].name).to.equal('Apple');
+        expect(data[0].company).to.be.ok;
+        expect(data[0].company.name).to.equal('Apple');
       });
     });
   });
